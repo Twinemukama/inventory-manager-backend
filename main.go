@@ -8,6 +8,7 @@ import (
 	"github.com/Twinemukama/go-inventory-manager/handlers"
 	"github.com/Twinemukama/go-inventory-manager/middlewares"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,6 +16,13 @@ func main() {
 	database.InitDB()
 
 	r := gin.Default()
+
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"https://inventory-manager-frontend-u13j.onrender.com"}, // frontend domain
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+	}))
 
 	auth := r.Group("/")
 	auth.Use(middlewares.AuthMiddleware())
