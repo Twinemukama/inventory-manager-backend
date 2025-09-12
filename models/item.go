@@ -13,6 +13,9 @@ type Item struct {
 	Price       float64 `json:"price"`
 	CategoryID  uint    `json:"category_id"`
 	UserID      uint    `json:"user_id"`
+	User        User    `json:"user" gorm:"foreignKey:UserID"`
+	CompanyID   uint    `json:"company_id"`
+	Company     Company `json:"company" gorm:"foreignKey:CompanyID"`
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

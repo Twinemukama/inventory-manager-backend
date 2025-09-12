@@ -11,7 +11,9 @@ import (
 var JwtKey = []byte("my_secret_key") // same as used in handlers
 
 type Claims struct {
-	UserId uint `json:"userId"`
+	UserId    uint   `json:"userId"`
+	Role      string `json:"role"`
+	CompanyID uint   `json:"companyId"`
 	jwt.RegisteredClaims
 }
 
@@ -23,7 +25,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Expecting: "Bearer <token>"
 		tokenParts := strings.Split(authHeader, " ")
 		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization format"})
@@ -42,8 +43,30 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Store user ID in context
+		// Store claims in context
 		c.Set("userId", claims.UserId)
+		c.Set("role", claims.Role)
+		c.Set("companyId", claims.CompanyID)
+
 		c.Next()
+	}
+}
+
+func RequireRole(roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "No role found"})
+			return
+		}
+
+		for _, r := range roles {
+			if role == r {
+				c.Next()
+				return
+			}
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Insufficient permissions"})
 	}
 }
