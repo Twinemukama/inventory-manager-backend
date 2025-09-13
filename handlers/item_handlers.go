@@ -18,8 +18,19 @@ func CreateItem(c *gin.Context) {
 		return
 	}
 
+	companyID := c.MustGet("companyId").(uint)
+	role := c.MustGet("role").(string)
 	userID := c.MustGet("userId").(uint)
+
 	item.UserID = userID
+
+	// Only super admins might specify a company in the payload
+	if role == "super_admin" && item.CompanyID != 0 {
+		// use company provided in payload
+	} else {
+		// force user/admin item to their own company
+		item.CompanyID = companyID
+	}
 
 	if err := database.DB.Create(&item).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -44,11 +55,24 @@ func ListItems(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
+	role := c.MustGet("role").(string)
+	companyID := c.MustGet("companyId").(uint)
+
 	var items []models.Item
 	var total int64
 
-	database.DB.Model(&models.Item{}).Count(&total)
-	if err := database.DB.Limit(limit).Offset(offset).Find(&items).Error; err != nil {
+	query := database.DB.Model(&models.Item{}).Preload("User").Preload("Company")
+
+	if role != "super_admin" {
+		query = query.Where("company_id = ?", companyID)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := query.Limit(limit).Offset(offset).Find(&items).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -66,7 +90,16 @@ func GetItem(c *gin.Context) {
 	id := c.Param("id")
 	var item models.Item
 
-	if err := database.DB.First(&item, id).Error; err != nil {
+	role := c.MustGet("role").(string)
+	companyID := c.MustGet("companyId").(uint)
+
+	query := database.DB.Where("id = ?", id)
+
+	if role != "super_admin" {
+		query = query.Preload("User").Preload("Company").Where("company_id = ?", companyID)
+	}
+
+	if err := query.First(&item).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
@@ -79,11 +112,19 @@ func UpdateItem(c *gin.Context) {
 	id := c.Param("id")
 	var item models.Item
 
-	if err := database.DB.First(&item, id).Error; err != nil {
+	userID := c.MustGet("userId").(uint)
+	role := c.MustGet("role").(string)
+	companyID := c.MustGet("companyId").(uint)
+
+	if err := database.DB.First(&item, "id = ? AND company_id = ?", id, companyID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
 		return
 	}
 
+	if role != "admin" && role != "super_admin" && item.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to update this item"})
+		return
+	}
 	var input models.Item
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -110,8 +151,17 @@ func DeleteItem(c *gin.Context) {
 	id := c.Param("id")
 	var item models.Item
 
-	if err := database.DB.First(&item, id).Error; err != nil {
+	userID := c.MustGet("userId").(uint)
+	role := c.MustGet("role").(string)
+	companyID := c.MustGet("companyId").(uint)
+
+	if err := database.DB.First(&item, "id = ? AND company_id = ?", id, companyID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+		return
+	}
+
+	if role != "admin" && role != "super_admin" && item.UserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to delete this item"})
 		return
 	}
 

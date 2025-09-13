@@ -14,6 +14,7 @@ import (
 
 func main() {
 	database.InitDB()
+	database.SeedSuperAdmin()
 
 	r := gin.Default()
 
@@ -33,6 +34,12 @@ func main() {
 	//sign up and login routes
 	r.POST("/signup", handlers.Signup)
 	r.POST("/login", handlers.Login)
+	r.GET("/companies", handlers.GetCompanies)
+
+	//verify user route - only admin and super admin can verify users
+	auth.PUT("/users/:id/verify", handlers.VerifyUser)
+	auth.GET("/users/pending", handlers.GetPendingUsers)
+	auth.DELETE("/users/:id/reject", handlers.RejectUser)
 
 	//Item routes
 	auth.POST("/items", handlers.CreateItem)
@@ -50,4 +57,5 @@ func main() {
 
 	log.Println("Server is running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
+
 }
