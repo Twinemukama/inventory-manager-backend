@@ -8,7 +8,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-	"github.com/Twinemukama/go-inventory-manager/models" // Adjust the import path as necessary
+	"github.com/Twinemukama/go-inventory-manager/models"
 	"github.com/joho/godotenv"
 )
 
@@ -42,6 +42,7 @@ func InitDB() {
 		&models.Category{},
 		&models.Item{},
 		&models.Transaction{},
+		&models.PendingRequest{},
 	)
 	if err != nil {
 		log.Fatal("Failed to auto-migrate models:", err)
