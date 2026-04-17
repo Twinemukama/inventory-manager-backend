@@ -1,6 +1,6 @@
 module github.com/Twinemukama/go-inventory-manager
 
-go 1.24.1
+go 1.24
 
 require (
 	github.com/bytedance/sonic v1.13.3 // indirect
