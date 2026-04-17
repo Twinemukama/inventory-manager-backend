@@ -23,7 +23,7 @@ func main() {
 			"https://inventory-manager-frontend-u13j.onrender.com",
 			"http://localhost:5173",
 		},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 	}))
@@ -54,6 +54,10 @@ func main() {
 	auth.GET("/categories/:id", handlers.GetCategory)
 	auth.PUT("/categories/:id", handlers.UpdateCategory)
 	auth.DELETE("/categories/:id", handlers.DeleteCategory)
+
+	// Pending Requests routes
+	auth.GET("/pending-requests", handlers.FetchPendingRequests)
+	auth.PATCH("/pending-requests/:id", handlers.RespondToRequest)
 
 	log.Println("Server is running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))

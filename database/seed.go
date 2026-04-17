@@ -36,7 +36,7 @@ func SeedSuperAdmin() {
 		CompanyID: company.ID,
 	}
 
-	if err := DB.Create(&superAdmin).Error; err != nil {
+	if err := DB.FirstOrCreate(&superAdmin).Error; err != nil {
 		log.Println("Failed to create super admin:", err)
 		return
 	}

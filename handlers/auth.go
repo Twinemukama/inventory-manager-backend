@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -31,13 +34,64 @@ type Claims struct {
 
 // POST /signup
 func Signup(c *gin.Context) {
-	var creds Credentials
-	if err := c.ShouldBindJSON(&creds); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// Read raw body so we can handle alternate field names for company id
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
-	// Check if email already exists
+	var creds Credentials
+	if err := json.Unmarshal(raw, &creds); err != nil {
+		// still try to continue; we'll return a bind error later if necessary
+	}
+
+	// also inspect raw map for alternate company id keys (companyID, company_id, company)
+	var bodyMap map[string]interface{}
+	_ = json.Unmarshal(raw, &bodyMap)
+	if creds.CompanyID == 0 && bodyMap != nil {
+		altKeys := []string{"companyId", "companyID", "company_id", "company"}
+		for _, k := range altKeys {
+			if v, ok := bodyMap[k]; ok && v != nil {
+				switch val := v.(type) {
+				case float64:
+					creds.CompanyID = uint(val)
+				case string:
+					if id, err := strconv.ParseUint(val, 10, 64); err == nil {
+						creds.CompanyID = uint(id)
+					}
+				case int:
+					creds.CompanyID = uint(val)
+				}
+				break
+			}
+		}
+
+		// If the client sent a nested company object like { "company": { "id": 3 } }
+		if creds.CompanyID == 0 {
+			if compRaw, ok := bodyMap["company"]; ok && compRaw != nil {
+				if compMap, ok := compRaw.(map[string]interface{}); ok {
+					// look for id-like keys inside the company object
+					for _, kid := range []string{"id", "companyId", "company_id"} {
+						if v2, ok2 := compMap[kid]; ok2 && v2 != nil {
+							switch val := v2.(type) {
+							case float64:
+								creds.CompanyID = uint(val)
+							case string:
+								if id, err := strconv.ParseUint(val, 10, 64); err == nil {
+									creds.CompanyID = uint(id)
+								}
+							case int:
+								creds.CompanyID = uint(val)
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
 	var existing models.User
 	if err := database.DB.Where("email = ?", creds.Email).First(&existing).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Email already registered"})
@@ -52,16 +106,10 @@ func Signup(c *gin.Context) {
 
 	var user models.User
 
-	// CASE 1: No CompanyID provided → Create new company and assign user as admin
-	if creds.CompanyID == 0 {
-		companyName := creds.CompanyName
-		if companyName == "" {
-			companyName = creds.Username + "'s Company"
-		}
-		company := models.Company{Name: companyName}
-
-		if err := database.DB.Create(&company).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create company"})
+	if creds.CompanyID != 0 {
+		var company models.Company
+		if err := database.DB.First(&company, creds.CompanyID).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Selected company does not exist"})
 			return
 		}
 
@@ -69,22 +117,67 @@ func Signup(c *gin.Context) {
 			Username:  creds.Username,
 			Email:     creds.Email,
 			Password:  string(hashedPassword),
-			Role:      "admin", // first user of company is admin
+			Role:      "user",
 			CompanyID: company.ID,
-			Company:   company,
-			Verified:  true, // admins are always verified
+			Verified:  false,
 		}
 
-	} else {
-		// CASE 2: Attach to existing company as normal user
-		user = models.User{
-			Username:  creds.Username,
-			Email:     creds.Email,
-			Password:  string(hashedPassword),
-			Role:      "user",
-			CompanyID: creds.CompanyID,
-			Verified:  false, // needs company admin approval
+		if err := database.DB.Create(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create user"})
+			return
 		}
+
+		pending := models.PendingRequest{
+			UserID:      user.ID,
+			UserName:    user.Username,
+			UserEmail:   user.Email,
+			Type:        "user_signup",
+			TargetID:    company.ID,
+			TargetName:  company.Name,
+			Status:      "pending",
+			Note:        "New user signup request for company approval",
+			RequestedAt: time.Now(),
+		}
+		if err := database.DB.Create(&pending).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create pending request"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Signup successful. Waiting for company admin approval.",
+			"status":  "pending_approval",
+			"user":    user,
+		})
+		return
+	}
+
+	companyName := creds.CompanyName
+	if companyName == "" {
+		companyName = creds.Username + "'s Company"
+	}
+
+	// enforce uniqueness for new company creation at application level
+	var existingCompany models.Company
+	if err := database.DB.Where("name = ?", companyName).First(&existingCompany).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Company name already exists"})
+		return
+	}
+
+	company := models.Company{Name: companyName}
+
+	if err := database.DB.Create(&company).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create company"})
+		return
+	}
+
+	user = models.User{
+		Username:  creds.Username,
+		Email:     creds.Email,
+		Password:  string(hashedPassword),
+		Role:      "admin", // first user of company is admin
+		CompanyID: company.ID,
+		Company:   company,
+		Verified:  true, // admins are always verified
 	}
 
 	if err := database.DB.Create(&user).Error; err != nil {
@@ -93,7 +186,8 @@ func Signup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "User created successfully",
+		"message": "Company created successfully. You are now the admin.",
+		"status":  "approved",
 		"user":    user,
 	})
 }
